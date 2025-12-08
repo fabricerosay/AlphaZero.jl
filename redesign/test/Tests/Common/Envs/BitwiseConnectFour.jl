@@ -7,8 +7,8 @@ using ....Util.StaticBitArrays
 
 export BitwiseConnectFourEnv
 
-const NUM_COLUMNS = 9
-const NUM_ROWS = 7
+const NUM_COLUMNS = 7
+const NUM_ROWS = 6
 const TO_CONNECT = 4
 
 const CROSS = true
@@ -33,7 +33,6 @@ A connect-four environment implemented using bitwise operations
 that can be run on GPU.
 """
 struct BitwiseConnectFourEnv
-    #pboard::bitboard
     board::bitboard
     curplayer::Bool
 end
@@ -143,8 +142,6 @@ It is a flatten 2x7x6 array with the following channels:
 function BatchedEnvs.vectorize_state(env::BitwiseConnectFourEnv)
     nbrd = get_player_board(env, NOUGHT)
     cbrd = get_player_board(env, CROSS)
-    #npbrd = get_player_pboard(env, NOUGHT)
-    #cpbrd = get_player_pboard(env, CROSS)
     order = (env.curplayer == NOUGHT) ? (@SVector [nbrd, cbrd]) : (@SVector [cbrd, nbrd])
     return Float32.(reduce(vcat, order))
 end
