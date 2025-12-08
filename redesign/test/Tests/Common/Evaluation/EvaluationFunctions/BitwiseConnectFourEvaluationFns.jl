@@ -219,7 +219,7 @@ function _sample_states(rng, num_states)
     final_states = []
     final_optimal_actions = []
 
-    cmd = pipeline(Cmd(`./c4solver`, dir="connect4"), stderr=devnull)
+    cmd = pipeline(Cmd(`./c4solver`, dir="/home/fabrice/Julia_Files/redesign/connect4"), stderr=devnull)
     process = open(cmd, "r+")
 
     for i in 1:num_states
@@ -474,7 +474,7 @@ end
 function plot_metrics(save_dir, timestamps, metrics)
     !isdir(save_dir) && mkpath(save_dir)
 
-    _plot_nn_and_accuracy_evaluations(save_dir, timestamps, metrics)
+#   _plot_nn_and_accuracy_evaluations(save_dir, timestamps, metrics)
     _plot_pos_benchmark_metrics(save_dir, timestamps, metrics)
 
     return nothing

@@ -38,7 +38,7 @@ using EllipsisNotation
 using Flux
 
 export EpisodeBuffer, save!, empty_env_in_buffer!, compute_value_functions!
-export ReplayBuffer, add!, to_array
+export ReplayBuffer, add!, to_array,to_array_nnue
 
 
 """
@@ -48,9 +48,14 @@ Buffer saving all training-related information episode-data of parallel environm
 Data will be saved in the form of Vectors on the CPU to avoid filling the GPU memory,
 as it's needed to fit as many parralel environments as possible.
 """
+
+#const Nactions=7
+
 mutable struct EpisodeBuffer
+    num_actions::Int
     states::Array{Float32}
     actions::Array{Int16}
+    policy::Array{Float32}
     rewards::Array{Float32}
     switches::Array{Bool}
     ep_lengths::Array{Int}
@@ -60,24 +65,28 @@ state_dim(ep_buff::EpisodeBuffer) = size(ep_buff.states)[1:(end - 2)]
 horizon(ep_buff::EpisodeBuffer) = size(ep_buff.states)[end - 1]
 num_envs(ep_buff::EpisodeBuffer) = size(ep_buff.states)[end]
 
-function EpisodeBuffer(num_envs::Int, state_size::Tuple, initial_horizon::Int = 10)
+function EpisodeBuffer(num_envs::Int, state_size::Tuple, num_actions::Int,initial_horizon::Int = 10)
     states = zeros(Float32, state_size..., initial_horizon, num_envs)
-    actions = zeros(Int16, initial_horizon, num_envs)
+    actions = zeros(Float32, initial_horizon, num_envs)
+    policy=zeros(Int16,num_actions,initial_horizon,num_envs)
     rewards = zeros(Float32, initial_horizon, num_envs)
     switches = zeros(Bool, initial_horizon, num_envs)
     ep_lengths = zeros(Int, num_envs)
-    return EpisodeBuffer(states, actions, rewards, switches, ep_lengths)
+    return EpisodeBuffer(num_actions,states, actions,policy, rewards, switches, ep_lengths)
 end
 
 function _increase_horizon(ep_buff)
     current_horizon = horizon(ep_buff)
-    new_horizon = 2current_horizon
+    new_horizon = 2*current_horizon
 
     new_states = zeros(Float32, state_dim(ep_buff)..., new_horizon, num_envs(ep_buff))
     new_states[.., 1:current_horizon, :] .= ep_buff.states[.., 1:current_horizon, :]
 
     new_actions = zeros(Int16, new_horizon, num_envs(ep_buff))
     new_actions[1:current_horizon, :] .= ep_buff.actions[1:current_horizon, :]
+    
+    new_policy= zeros(Float32,ep_buff.num_actions,new_horizon,num_envs(ep_buff))
+    new_policy[:,1:current_horizon, :] .= ep_buff.policy[:,1:current_horizon, :]
 
     new_rewards = zeros(Float32, new_horizon, num_envs(ep_buff))
     new_rewards[1:current_horizon, :] .= ep_buff.rewards[1:current_horizon, :]
@@ -87,11 +96,12 @@ function _increase_horizon(ep_buff)
 
     ep_buff.states = new_states
     ep_buff.actions = new_actions
+    ep_buff.policy = new_policy
     ep_buff.rewards = new_rewards
     ep_buff.switches = new_switches
 end
 
-function save!(ep_buff, states::AbstractVector, actions, rewards, switches)
+function save!(ep_buff, states::AbstractVector, actions, policy,rewards, switches)
     # if the buffer is full, increase the horizon
     (maximum(ep_buff.ep_lengths) == horizon(ep_buff)) && _increase_horizon(ep_buff)
 
@@ -104,6 +114,7 @@ function save!(ep_buff, states::AbstractVector, actions, rewards, switches)
         save_index = ep_buff.ep_lengths[env_id]
         ep_buff.states[.., save_index, env_id] .= states[env_id]
         ep_buff.actions[save_index, env_id] = actions[env_id]
+        ep_buff.policy[..,save_index, env_id] .= policy[env_id]
         ep_buff.rewards[save_index, env_id] = rewards[env_id]
         ep_buff.switches[save_index, env_id] = switches[env_id]
     end
@@ -134,6 +145,7 @@ mutable struct ReplayBuffer
     num_actions::Int
     states::Array{Float32}
     actions::Array{Int16}
+    policy::Array{Float32}
     values::Array{Float32}
     current_size::Int
     most_recent_pos::Int
@@ -142,8 +154,9 @@ end
 function ReplayBuffer(max_size::Int, state_size::Tuple, num_actions::Int)
     states = zeros(Float32, state_size..., max_size)
     actions = zeros(Int16, max_size)
+    policy=zeros(Float32,num_actions,max_size)
     values = zeros(Float32, 1, max_size)
-    return ReplayBuffer(max_size, num_actions, states, actions, values, 0, 0)
+    return ReplayBuffer(max_size, num_actions, states, actions,policy, values, 0, 0)
 end
 
 Base.length(rp_buff::ReplayBuffer) = rp_buff.current_size
@@ -151,6 +164,7 @@ Base.length(rp_buff::ReplayBuffer) = rp_buff.current_size
 function _overwrite!(rp_buff, rp_buff_range, ep_buff, ep_buff_range, env_id)
     rp_buff.states[.., rp_buff_range] .= ep_buff.states[.., ep_buff_range, env_id]
     rp_buff.actions[rp_buff_range] .= ep_buff.actions[ep_buff_range, env_id]
+    rp_buff.policy[..,rp_buff_range] .= ep_buff.policy[..,ep_buff_range, env_id]
     rp_buff.values[1, rp_buff_range] .= ep_buff.rewards[ep_buff_range, env_id]
 end
 
@@ -187,13 +201,21 @@ end
 function to_array(rp_buff::ReplayBuffer)
     # get data up to current size
     states = rp_buff.states[.., 1:length(rp_buff)]
-    actions = rp_buff.actions[1:length(rp_buff)]
+    #actions = rp_buff.actions[1:length(rp_buff)]
     state_values = rp_buff.values[:, 1:length(rp_buff)]
 
     # one-hot encode the actions
-    actions = Flux.onehotbatch(actions, 1:rp_buff.num_actions)
+    actions =rp_buff.policy[:,1:length(rp_buff)] #Flux.onehotbatch(actions, 1:rp_buff.num_actions)
 
     return states, actions, state_values
 end
+function to_array_nnue(rp_buff::ReplayBuffer)
+    # get data up to current size
+    states = rp_buff.states[.., 1:length(rp_buff)]
+    #actions = rp_buff.actions[1:length(rp_buff)]
+    state_values = rp_buff.values[:, 1:length(rp_buff)]
 
+
+    return states, state_values
+end
 end

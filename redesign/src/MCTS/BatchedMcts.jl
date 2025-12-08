@@ -76,12 +76,12 @@ import Base.Iterators.map as imap
 
 using ..BatchedMctsUtilities
 using ..Util.Devices
-using ..Util.Devices.KernelFuns: sum, argmax, maximum, softmax, categorical_sample
+using ..Util.Devices.KernelFuns: sum, argmax, maximum, softmax, categorical_sample,μ
 
 
 export gumbel_explore, explore
 export gumbel_policy, evaluation_policy
-export get_root_children_visits, get_completed_qvalues
+export get_root_children_visits, get_completed_qvalues, get_root_ipolicy
 
 
 # # Tree datastructure
@@ -425,6 +425,23 @@ function completed_qvalues(
     return SVector{A}(ret)
 end
 
+# function log_completed_qvalues(
+#     tree,
+#     cid,
+#     bid,
+#     num_actions::Val{A};
+#     invalid_actions_value = -Inf32
+# ) where {A}
+#     root_value=clamp(root_value_estimate(tree, cid, bid, num_actions),-0.99f0,0.99f0)
+#     log_root_value = atanh(root_value)
+#     ret = imap(1:A) do aid
+#         (!tree.valid_actions[aid, cid, bid]) && return invalid_actions_value
+
+#         cnid = tree.children[aid, cid, bid]
+#         return cnid != UNVISITED ? atanh(clamp(qvalue(tree, cnid, bid),-0.99f0,0.99f0)) : log_root_value
+#     end
+#     return SVector{A}(ret)
+# end
 """
     alphazero_qvalues(tree, cid, bid, ::Val{A}) where {A}
 
@@ -517,6 +534,26 @@ Computes q-values (action scores), indicating how favorable each action is for a
 # Returns
 - An SVector of size (num_actions,) containing the transformed qvalues for each action.
 """
+# function transformed_qvalues(
+#     c_scale,
+#     c_visit,
+#     tree,
+#     cid,
+#     bid,
+#     num_actions::Val{A},
+#     invalid_actions_value = -Inf32
+# ) where {A}
+   
+#     root_value = root_value_estimate(tree, cid, bid, num_actions)
+  
+#     ret = imap(1:A) do aid
+#         (!tree.valid_actions[aid, cid, bid]) && return invalid_actions_value
+
+#         cnid = tree.children[aid, cid, bid]
+#         return cnid != UNVISITED ? (qvalue(tree, cnid, bid)-root_value)* sqrt(Float32(tree.num_visits[cnid, bid])) : 0.0f0
+#     end
+#     return SVector{A}(ret)
+#  end
 function transformed_qvalues(
     c_scale,
     c_visit,
@@ -525,8 +562,16 @@ function transformed_qvalues(
     bid,
     num_actions::Val{A}
 ) where {A}
+   
     qvalues = completed_qvalues(tree, cid, bid, num_actions)
+ 
+    #root_value=root_value_estimate(tree, cid, bid, num_actions)
+    
+    #σ=μ(qvalues;init=root_value)
+    #scale with visit child
+   
     qcoefficient = qcoeff(c_scale, c_visit, tree, cid, bid, num_actions)
+   
     σ_q = qcoefficient * qvalues
     return σ_q
 end
@@ -564,6 +609,8 @@ function gumbel_select_action(c_scale, c_visit, tree, cid, bid, num_actions::Val
 
     return Int16(argmax(scores; init=(NO_ACTION, -Inf32)))
 end
+
+
 
 """
     alphazero_select_action(c_puct, tree, cid, bid, num_actions::Val{A}) where {A}
@@ -870,7 +917,7 @@ function eval!(mcts_config, tree, simnum, parent_frontier)
 
     # get terminal nodes at `parent_frontier`
     non_terminal_mask = parent_frontier[ACTION, :] .!= NO_ACTION
-    non_terminal_bids = DeviceArray(mcts_config.device)(@view((1:B)[non_terminal_mask]))
+    non_terminal_bids = DeviceArray(mcts_config.device)(@view((1:B)[Array(non_terminal_mask)]))
     # No new node to expand (a.k.a only terminal node on the frontier)
     (length(non_terminal_bids) == 0) && return parent_frontier[PARENT, :]
 
@@ -1077,7 +1124,7 @@ function gumbel_select_root_action(
     g = SVector{A}(imap(aid -> gumbel[aid, bid], 1:A))
 
     # get logits and σ(completedQ)
-    logits = SVector{A}(imap(aid -> tree.logit_prior[aid, ROOT, bid], 1:A))
+    logits = SVector{A}(imap(aid -> tree.logit_prior[aid, ROOT, bid]/1.2f0, 1:A))
     σ_q = transformed_qvalues(c_scale, c_visit, tree, ROOT, bid, num_actions)
 
     # -∞ penalty to mask out actions not in `argtop(g(a) + logits + σ(completedQ), m)`
@@ -1139,7 +1186,7 @@ Returns an array of size (num_envs,) containing the resulting actions selected
 by the sequential halving procedure with gumbel for each environment. This function should
 be used after `gumbel_explore()` has been run.
 """
-function gumbel_policy(tree, mcts_config, gumbel)
+function gumbel_policy(tree, mcts_config, gumbel)#,current_steps,rng::AbstractRNG)
     num_actions = Val(n_actions(tree))
     c_scale, c_visit = mcts_config.value_scale, mcts_config.max_visit_init
 
@@ -1147,10 +1194,45 @@ function gumbel_policy(tree, mcts_config, gumbel)
     Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
         actions[bid] = gumbel_mcts_action(c_scale, c_visit, tree, bid, gumbel, num_actions)
     end
-
+   # policy=get_ipolicy(tree,c_scale,c_visit,bid,num_actions,t)
     return actions
+#     num_actions = Val(n_actions(tree))
+# #    τ = mcts_config.tau
+#  #   deterministic_move_idx = mcts_config.collapse_tau_move
+#     c_scale, c_visit = mcts_config.value_scale, mcts_config.max_visit_init
+#     probs = DeviceArray(mcts_config.device)(rand(rng, Float32, batch_size(tree)))
+#     actions = zeros(Int16, mcts_config.device, batch_size(tree))
+#     Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
+#         if current_steps[bid] >= 30#deterministic_move_idx 
+#             t=0.3f0
+#         else
+#             t=1.0f0
+#         end
+#         policy=get_ipolicy(tree,c_scale,c_visit,bid,num_actions,t)
+#         actions[bid] = categorical_sample(policy, probs[bid])#gumbel_mcts_action(c_scale, c_visit, tree, bid, gumbel, num_actions)
+#     end
+
+#     return actions
 end
 
+
+# function gumbel_policy(tree, mcts_config, gumbel,current_steps,rng::AbstractRNG)
+
+#     num_actions = Val(n_actions(tree))
+# #    τ = mcts_config.tau
+#  #   deterministic_move_idx = mcts_config.collapse_tau_move
+#     c_scale, c_visit = mcts_config.value_scale, mcts_config.max_visit_init
+#     probs = DeviceArray(mcts_config.device)(rand(rng, Float32, batch_size(tree)))
+#     actions = zeros(Int16, mcts_config.device, batch_size(tree))
+#     Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
+#         λ=exp(-current_steps[bid]/8)
+#         t=1.0f0*λ+(1-λ)(0.3f0)
+#         policy=get_ipolicy(tree,c_scale,c_visit,bid,num_actions,t)
+#         actions[bid] = categorical_sample(policy, probs[bid])#gumbel_mcts_action(c_scale, c_visit, tree, bid, gumbel, num_actions)
+#     end
+
+#     return actions
+# end
 """
     alphazero_policy(tree, mcts_config, rng::AbstractRNG)
 
@@ -1205,6 +1287,22 @@ Returns an array of size (num_actions, num_envs) containing the number of visits
 each action at the root node for each environment. This function should be used after
 `gumbel_explore()` or `explore()` has been run.
 """
+function get_ipolicy(tree,c_scale,c_visit, bid, num_actions::Val{A},τ=1.1f0) where {A}
+    logits = SVector{A}(imap(aid -> tree.valid_actions[aid, 1, bid] ? tree.logit_prior[aid, 1, bid]/τ : -Inf32, 1:A))+
+    transformed_qvalues(c_scale, c_visit, tree, 1, bid, num_actions)
+    return softmax(logits)
+end
+function get_root_ipolicy(tree, mcts_config,c_scale=0.1f0,c_visit=50)
+    # compute the policy: π′ = softmax(logits + σ(completedQ))
+    num_actions = Val(n_actions(tree))
+    #c_scale, c_visit = mcts_config.value_scale, mcts_config.max_visit_init
+    ipolicy=zeros(Float32, mcts_config.device, (n_actions(tree), batch_size(tree)))
+    Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
+        ipolicy[:,bid] .= get_ipolicy(tree,c_scale,c_visit,bid,num_actions)
+    end
+    ipolicy
+end
+
 function get_root_children_visits(tree, mcts_config)
     num_actions = Val(n_actions(tree))
 
@@ -1213,7 +1311,7 @@ function get_root_children_visits(tree, mcts_config)
         visits[:, bid] .= get_num_child_visits(tree, ROOT, bid, num_actions)
     end
 
-    return visits
+    return visits./mcts_config.num_simulations
 end
 
 """

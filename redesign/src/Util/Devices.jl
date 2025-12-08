@@ -114,6 +114,16 @@ using CUDA
         return acc
     end
 
+    function μ(xs; init)
+        acc = 0.0f0
+        n=0.0f0
+        for x in xs
+            acc += (x-init)*(x-init)
+            n+=1.0f0
+        end
+        return acc/n
+    end
+
     maximum(f, xs; init) = maximum((f(x) for x in xs); init)
     sum(f, xs; init) = sum((f(x) for x in xs); init)
 

@@ -83,7 +83,7 @@ function uniform_env_oracle()
     function init_fn(envs)
         n_actions = BatchedEnvs.num_actions(eltype(envs))
         num_envs = length(envs)
-        device = get_device(envs)
+        device = Devices.get_device(envs)
 
         valid_actions = get_valid_actions(envs)
         logits = get_policy_prior(n_actions, num_envs, device)
@@ -102,7 +102,7 @@ function uniform_env_oracle()
     function transition_fn(envs, action_ids)
         n_actions = BatchedEnvs.num_actions(eltype(envs))
         num_envs = length(envs)
-        device = get_device(envs)
+        device = Devices.get_device(envs)
 
         act_info = act.(envs, action_ids)
         internal_states = get_state.(act_info)
@@ -141,7 +141,7 @@ function neural_network_env_oracle(; nn::Net) where Net <: FluxNetwork
 
     function init_fn(envs)
         num_envs = length(envs)
-        device = get_device(envs)
+        device = Devices.get_device(envs)
 
         states = zeros(Float32, device, BatchedEnvs.state_size(eltype(envs))..., num_envs)
         Devices.foreach(1:num_envs, device) do env_id
@@ -149,7 +149,7 @@ function neural_network_env_oracle(; nn::Net) where Net <: FluxNetwork
             return nothing
         end
         value_prior, logits = forward(nn, states, false)
-
+        logits=log.(softmax(logits))
         valid_actions = get_valid_actions(envs)
         logits = validate_logits(logits, valid_actions)
         policy_prior = Flux.softmax(logits; dims=1)
@@ -166,7 +166,7 @@ function neural_network_env_oracle(; nn::Net) where Net <: FluxNetwork
 
     function transition_fn(envs, aids)
         num_envs = length(envs)
-        device = get_device(envs)
+        device = Devices.get_device(envs)
 
         act_info = BatchedEnvs.act.(envs, aids)
         new_envs = get_state.(act_info)

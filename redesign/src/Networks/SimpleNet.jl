@@ -15,10 +15,6 @@ Hyperparameters for the simplenet architecture.
 @kwdef struct SimpleNetHP
   width::Int
   depth_common::Int
-  depth_phead::Int = 1
-  depth_vhead::Int = 1
-  use_batch_norm::Bool = false
-  batch_norm_momentum::Float32 = 0.6f0
 end
 
 
@@ -41,17 +37,12 @@ function SimpleNet(indim::Int, outdim::Int, hyper::SimpleNetHP)
     weight_init() = Flux.glorot_uniform(rng)
 
     function make_dense(indim, outdim)
-        if hyper.use_batch_norm
-            Flux.Chain(
-                Flux.Dense(indim => outdim; init=weight_init()),
-                Flux.BatchNorm(outdim, Flux.relu; momentum=hyper.batch_norm_momentum)
-            )
-        else
-            Flux.Dense(indim => outdim, Flux.relu; init=weight_init())
-        end
+      
+        Flux.Dense(indim => outdim, Flux.relu; init=weight_init())
+    
     end
 
-    hidden_layers(depth) = [make_dense(hyper.width, hyper.width) for _ in 1:depth]
+    hidden_layers(depth) = [make_dense(hyper.width,hyper.width) for _ in 1:depth]
 
     common = Flux.Chain(
         Flux.flatten,
@@ -59,15 +50,11 @@ function SimpleNet(indim::Int, outdim::Int, hyper::SimpleNetHP)
         hidden_layers(hyper.depth_common)...
     )
 
-    vhead = Flux.Chain(
-        hidden_layers(hyper.depth_vhead)...,
-        Flux.Dense(hyper.width => 1, tanh; init=weight_init())
-    )
+    vhead = Flux.Dense(hyper.width => 1, tanh; init=weight_init())
+    
 
-    phead = Flux.Chain(
-        hidden_layers(hyper.depth_phead)...,
-        Flux.Dense(hyper.width => outdim; init=weight_init())
-    )
+    phead =Flux.Dense(hyper.width => outdim; init=weight_init())
+
 
     SimpleNet(hyper, common, vhead, phead)
 end
@@ -84,4 +71,10 @@ function forward(nn::SimpleNet, x, use_softmax=false)
     p = nn.phead(common)
     use_softmax && (p = Flux.softmax(p))
     return v, p
+end
+
+function rescale(nn::SimpleNet,τ=1.2f0)
+    println("rescaling...")
+    nn.phead.weight./=τ
+    nn.phead.bias./=τ
 end
