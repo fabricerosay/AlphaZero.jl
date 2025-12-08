@@ -11,22 +11,23 @@ using JLD2
 using Flux
 using Random
 
-const SAVEDIR = "examples/models_nnue/connect-four-checkpoints"
+const SAVEDIR = "examples/models/connect-four-checkpoints"
 const PLOTSDIR = "examples/plots/connect-four"
 
 state_dim = BatchedEnvs.state_size(BitwiseConnectFourEnv)
 action_dim = BatchedEnvs.num_actions(BitwiseConnectFourEnv)
 
 # large architecture
-const MODEL_PATH = "examples/models_nnue/connect-four-checkpoints/model_020900.jld2"
-neural_net_hyperparams = SimpleNetHP(
-    width=192,
-    depth_common=1,
+const MODEL_PATH = "examples/models/connect-four-checkpoints/model_020900.jld2"
+neural_net_hyperparams = SimpleResNetHP(
+    width=512,
+    depth_common=6,
+    depth_vhead=1,
+    depth_phead=1
 )
-nn_cpu = SimpleNet(state_dim..., action_dim, neural_net_hyperparams)
-println(state_dim,action_dim)
-nnue_hyper_params=NnueNetHP(832)
-nnue_cpu=NnueNet(nnue_hyper_params)
+nn_cpu = SimpleResNet(state_dim..., action_dim, neural_net_hyperparams)
+
+
 function load_nn()
     state_dim = BatchedEnvs.state_size(BitwiseConnectFourEnv)
     action_dim = BatchedEnvs.num_actions(BitwiseConnectFourEnv)
@@ -38,10 +39,6 @@ function load_nn()
     return nn
 end
 
-#nn_cpu=load_nn()
-#nn_cpu = SimpleNet(state_dim..., action_dim,nn_config)
-#conv_hyper=ConvResNetHP(entry=(6,7,4),hidden_size=32,depth_common=5)
-#nn_cpu=ConvResNet(7,conv_hyper)
 # global lists used to retrieve data from the benchmarks
 metrics = Dict(
     "az" => Dict("random" => [], "minimax" => [], "benchmark" => [], "pons" => []),
@@ -113,25 +110,25 @@ function get_eval_fns()
     #    metrics
   # )
     nn_vs_random_eval_fn = get_nn_vs_random_eval_fn(nn_vs_random_kwargs, metrics)
-   #alphazero_vs_minimax_eval_fn = get_alphazero_vs_minimax_eval_fn(
-    #   az_vs_minimax_kwargs,
-     #  metrics
-    #)
+    alphazero_vs_minimax_eval_fn = get_alphazero_vs_minimax_eval_fn(
+    az_vs_minimax_kwargs,
+    metrics
+    )
     nn_vs_minimax_eval_fn = get_nn_vs_minimax_eval_fn(nn_vs_minimax_kwargs, metrics)
-    # fns = get_connect_four_benchmark_fns(benchmark_fns_kwargs, metrics)
-    # mcts_benchmark_fn, nn_benchmark_fn = fns
-    # fns = get_pons_benchmark_fns(pos_benchmark_fns_kwargs, metrics)
-    # az_pons_benchmark_fn, nn_pons_benchmark_fn = fns
+    fns = get_connect_four_benchmark_fns(benchmark_fns_kwargs, metrics)
+    mcts_benchmark_fn, nn_benchmark_fn = fns
+    fns = get_pons_benchmark_fns(pos_benchmark_fns_kwargs, metrics)
+    az_pons_benchmark_fn, nn_pons_benchmark_fn = fns
 
     return [
         #alphazero_vs_random_eval_fn,
         nn_vs_random_eval_fn,
-        #alphazero_vs_minimax_eval_fn,
+        alphazero_vs_minimax_eval_fn,
         nn_vs_minimax_eval_fn,
-        #mcts_benchmark_fn,
-        #nn_benchmark_fn,
-        #az_pons_benchmark_fn,
-        #nn_pons_benchmark_fn
+        mcts_benchmark_fn,
+        nn_benchmark_fn,
+        az_pons_benchmark_fn,
+        nn_pons_benchmark_fn
     ]
 end
 
@@ -147,7 +144,7 @@ function create_config()
     # common MCTS variables
     use_gumbel_mcts = true
     num_simulations = 32
-    num_considered_actions::Int = 3
+    num_considered_actions::Int = 4
     mcts_value_scale::Float32 =1.0f0
     mcts_max_visit_init::Int = 50
 
@@ -183,7 +180,7 @@ function create_config()
     eval_freq = num_envs * 200
 
     # Total train steps
-    num_steps = num_envs * 100000
+    num_steps = num_envs * 10000
 
     return TrainConfig(;
         EnvCls=EnvCls,
@@ -239,7 +236,7 @@ run(`rm -rf $(PLOTSDIR)`)
 
 # # train!
  nn, execution_times = selfplay!(config, device, nn)
- ##nn, execution_times = supervise!(config, device, nn,nnue)
+
 # # get train timestamps
  timestamps = get_train_timestamps(execution_times, config)
 

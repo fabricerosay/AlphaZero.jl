@@ -191,46 +191,6 @@ function train!(nn, replay_buffer, opt, device, config, loggers, rng)
 end
 
 
-
-function train_nnue!(nn, replay_buffer, opt, device, config, loggers, rng)
-    # get the data in a meaningul format
-    states, state_values = to_array_nnue(replay_buffer)
-
-    # create a dataloader
-    statesopp=cat(dims=1,states[64:126,:],states[1:63,:])
-    truestates=reshape(cat(dims=1,states[1:126,:],statesopp),126,2,:)
-    data = (truestates, state_values)
-    dataloader = Flux.DataLoader(data, batchsize=config.batch_size, shuffle=true, rng=rng)
-    batchsize=config.batch_size
-    # train the model for the specified number of epochs
-    for _ in 1:config.train_epochs
-        cpt=0
-        for batch in dataloader
-            if batchsize*cpt>1_000_000
-                break
-            end
-            cpt+=1
-            # if the batch has only 1 element, it will trigger NaN in BatchNorm -> skip
-            (size(batch[1])[end] == 1) && continue
-          
-            # convert to train device
-            batch = map(DeviceArray(device), batch)
-           
-            # hack: predefine variables so they get assigned correctly inside the do block
-            val_loss, pol_loss = 0f0, 0f0
-            loss, grads = Flux.withgradient(nn) do model
-                loss = nnue_loss(model, batch...)
-                return loss
-            end
-            clamp_nn(nn)
-            "tb" in keys(loggers) && log_losses(loggers["tb"], val_loss, pol_loss, loss)
-            _, nn = Flux.update!(opt, nn, grads[1])
-        end
-    end
-
-    return nn
-end
-
 """
     selfplay!(config, device, nn)
 
@@ -298,7 +258,7 @@ function selfplay!(config, device, nn, print_progress=true)
             t = @elapsed begin
                 actions = MCTS.alphazero_policy(tree, mcts_config, steps_counter, mcts_rng)
                 policy= get_root_ipolicy(tree, mcts_config)|>cpu
-                policy=[SVector{7}(policy[:,k]) for k in 1:size(policy)[2]]
+                policy=[SVector{num_actions}(policy[:,k]) for k in 1:size(policy)[2]]
                 #policy= get_root_children_visits(tree, mcts_config)|>cpu
                 #policy=[SVector{7}(policy[:,k]) for k in 1:size(policy)[2]]
             end
@@ -344,95 +304,6 @@ function selfplay!(config, device, nn, print_progress=true)
 end
 
 
-function supervise!(config, device, nn, nn_supervised, print_progress=true)
-     state_size = BatchedEnvs.state_size(config.EnvCls)
-    num_actions = BatchedEnvs.num_actions(config.EnvCls)
-
-    adam = Flux.Optimiser(Flux.WeightDecay(config.weight_decay), Flux.Adam(config.adam_lr))
-    opt = Flux.setup(adam, nn_supervised)
-
-    envs, steps_counter = init_envs(config, config.num_envs, device)
-
-    batch_steps = config.num_steps ÷ config.num_envs
-    batch_train_freq = config.train_freq ÷ config.num_envs
-    batch_eval_freq = config.eval_freq ÷ config.num_envs
-
-    ep_buff = EpisodeBuffer(config.num_envs, state_size,num_actions)
-    rp_buff = ReplayBuffer(config.replay_buffer_size, state_size, num_actions)
-
-    loggers = init_loggers(config; overwrite_logfiles=true, overwrite_tb_logdir=true)
-
-    mcts_rng = Random.MersenneTwister(3409)
-    train_rng = Random.MersenneTwister(3409)
-
-    (config.nn_save_dir != "") && save_nn(nn_supervised, config.nn_save_dir, 0, batch_steps)
-
-    times = TrainExecutionTimes(batch_steps)
-
-    for step in 1:batch_steps
-        print_progress && println("Step: $step.")
-
-        # instiantiate mcts config object
-        mcts_config = init_mcts_config(device, nn, config)
-
-        # run mcts
-        if config.use_gumbel_mcts
-            t = @elapsed tree, gumbel = MCTS.gumbel_explore(mcts_config, envs, mcts_rng)
-            times.explore_times[step] = t
-
-            t = @elapsed begin
-                actions = MCTS.gumbel_policy(tree, mcts_config, gumbel)#,mcts_rng)
-                policy= get_root_ipolicy(tree, mcts_config)|>cpu
-                policy=[SVector{num_actions}(policy[:,k]) for k in 1:size(policy)[2]]
-            end
-            times.selection_times[step] = t
-        else
-            t = @elapsed tree = MCTS.alphazero_explore(mcts_config, envs, mcts_rng)
-            times.explore_times[step] = t
-
-            t = @elapsed begin
-                actions = MCTS.alphazero_policy(tree, mcts_config, steps_counter, mcts_rng)
-                policy= get_root_ipolicy(tree, mcts_config)|>cpu
-                policy=[SVector{7}(policy[:,k]) for k in 1:size(policy)[2]]
-                #policy= get_root_children_visits(tree, mcts_config)|>cpu
-                #policy=[SVector{7}(policy[:,k]) for k in 1:size(policy)[2]]
-            end
-            times.selection_times[step] = t
-        end
-
-        # step, save data from terminated episodes and reset them
-        t = @elapsed begin
-            envs .= step_save_reset!(config, envs, steps_counter, actions, policy,ep_buff, rp_buff)
-        end
-        times.step_save_reset_times[step] = t
-
-        # train the network if it's time to do so
-        if step % batch_train_freq == 0 && length(rp_buff) >= config.min_train_samples
-            print_progress && println("Training with $(length(rp_buff)) samples.")
-            t = @elapsed begin
-                set_train_mode!(nn_supervised)
-                nn_supervised = train_nnue!(nn_supervised, rp_buff, opt, device, config, loggers, train_rng)
-                set_test_mode!(nn_supervised)
-            end
-            times.train_times[step] = t
-            (config.nn_save_dir != "") && save_nn(nn_supervised, config.nn_save_dir, step, batch_steps)
-        end
-
-        # evaluate the network if it's time to do so
-        # if batch_eval_freq > 0 && step % batch_eval_freq == 0 && length(config.eval_fns) > 0
-        #     "eval" in keys(loggers) && log_msg(loggers["eval"], "Evaluating at step: $step")
-        #     t = @elapsed begin
-        #         for eval_fn in config.eval_fns
-        #             eval_fn(loggers, nn_supervised, config, step)
-        #         end
-        #     end
-        #     times.eval_times[step] = t
-        #     "eval" in keys(loggers) && write_msg(loggers["eval"], "\n")
-        # end
-    end
-
-    return nn_supervised, times
-end
 
 
 end
