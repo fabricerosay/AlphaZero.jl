@@ -1,7 +1,6 @@
 module Devices
 
 using CUDA
-
 export Device, GPU, CPU, DeviceArray, arr_is_on_gpu, get_device, copy_to_CPU
 export zeros, ones, fill
 
@@ -39,30 +38,6 @@ Base.ones(device::Device, dims...) = ones(Float64, device, dims)
 Base.fill(x, ::CPU, dims...) = Base.fill(x, dims...)
 Base.fill(x, ::GPU, dims...) = CUDA.fill(x, dims...)
 
-"""
-A device agnostic parallel loop construct.
-"""
-function foreach end
-
-function foreach(f, xs, ::CPU)
-    # TODO: use @threads?
-    for x in xs
-        f(x)
-    end
-    return nothing
-end
-
-function foreach(f, xs, ::GPU)
-    # Hopefully, CUDA provides a simple loop API
-    # in the future and we do not have to use this hack with
-    # `map` which involves some useless allocations.
-    xs_gpu = CuArray(xs)
-    map(xs_gpu) do x
-        f(x)
-        return nothing
-    end
-    return nothing
-end
 
 """
 Simpler versions of base functions that can easily be handled by the GPU compiler.

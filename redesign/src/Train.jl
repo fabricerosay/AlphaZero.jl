@@ -30,7 +30,7 @@ trained_nn, execution_times = Train.selfplay!(config, device, nn)
 ```
 """
 module Train
-
+using AcceleratedKernels
 using CUDA
 using Flux
 using Logging
@@ -68,12 +68,12 @@ transferred to the replay buffer.
 - `γ`: The discount factor used to compute state values of terminated episodes.
 """
 
-function step_save_reset!(config, envs, steps_counter, actions, policy, ep_buff, rp_buff, γ=1f0)
+function step_save_reset!(config, envs,startenvs, steps_counter, actions, policy, ep_buff, rp_buff, γ=1f0)
     # step
     out = act.(envs, actions)
     new_envs = first.(out)
     steps_counter .+= 1
-
+    num_actions = BatchedEnvs.num_actions(config.EnvCls)
     # save step data
     states = BatchedEnvs.vectorize_state.(envs)
     rewards = Float32.(map(x -> last(x).reward, out))
@@ -97,11 +97,19 @@ function step_save_reset!(config, envs, steps_counter, actions, policy, ep_buff,
     end
 
     # reset terminated envs
-    moves1=gpu(rand(1:9,config.num_envs))
-    Devices.foreach(1:config.num_envs, Devices.get_device(envs)) do env_id
+    moves1=gpu(rand(1:num_actions,config.num_envs))
+    choosing=gpu(rand(config.num_envs))
+    AcceleratedKernels.foreachindex(choosing) do env_id
         @inbounds if dones[env_id]
-            new_envs[env_id] =BatchedEnvs.reset(envs[env_id],moves1[env_id])
+            if choosing[env_id]<0.5
+                new_envs[env_id] =BatchedEnvs.reset(envs[env_id],moves1[env_id])
+            else
+                new_envs[env_id]=startenvs[env_id]
+            end 
+
             steps_counter[env_id] = 0
+        elseif choosing[env_id]<0.1
+            startenvs[env_id]=envs[env_id]
         end
     end
 
@@ -217,7 +225,7 @@ function selfplay!(config, device, nn, print_progress=true)
     opt = Flux.setup(adam, nn)
 
     envs, steps_counter = init_envs(config, config.num_envs, device)
-
+     startenvs,_ = init_envs(config, config.num_envs, device)
     batch_steps = config.num_steps ÷ config.num_envs
     batch_train_freq = config.train_freq ÷ config.num_envs
     batch_eval_freq = config.eval_freq ÷ config.num_envs
@@ -247,7 +255,7 @@ function selfplay!(config, device, nn, print_progress=true)
 
             t = @elapsed begin
                 actions = MCTS.gumbel_policy(tree, mcts_config, gumbel)#,mcts_rng)
-                policy= get_root_ipolicy(tree, mcts_config)|>cpu
+                policy= get_root_improved_policy(tree, mcts_config)|>cpu
                 policy=[SVector{num_actions}(policy[:,k]) for k in 1:size(policy)[2]]
             end
             times.selection_times[step] = t
@@ -257,17 +265,15 @@ function selfplay!(config, device, nn, print_progress=true)
 
             t = @elapsed begin
                 actions = MCTS.alphazero_policy(tree, mcts_config, steps_counter, mcts_rng)
-                policy= get_root_ipolicy(tree, mcts_config)|>cpu
+                policy= get_root_children_visits(tree, mcts_config)|>cpu
                 policy=[SVector{num_actions}(policy[:,k]) for k in 1:size(policy)[2]]
-                #policy= get_root_children_visits(tree, mcts_config)|>cpu
-                #policy=[SVector{7}(policy[:,k]) for k in 1:size(policy)[2]]
             end
             times.selection_times[step] = t
         end
 
         # step, save data from terminated episodes and reset them
         t = @elapsed begin
-            envs .= step_save_reset!(config, envs, steps_counter, actions, policy,ep_buff, rp_buff)
+            envs .= step_save_reset!(config, envs,startenvs, steps_counter, actions, policy,ep_buff, rp_buff)
         end
         times.step_save_reset_times[step] = t
 

@@ -122,9 +122,9 @@ function get_eval_fns()
 
     return [
         #alphazero_vs_random_eval_fn,
-        nn_vs_random_eval_fn,
-        alphazero_vs_minimax_eval_fn,
-        nn_vs_minimax_eval_fn,
+        #nn_vs_random_eval_fn,
+        #alphazero_vs_minimax_eval_fn,
+        #nn_vs_minimax_eval_fn,
         mcts_benchmark_fn,
         nn_benchmark_fn,
         az_pons_benchmark_fn,
@@ -143,8 +143,8 @@ function create_config()
 
     # common MCTS variables
     use_gumbel_mcts = true
-    num_simulations = 32
-    num_considered_actions::Int = 4
+    num_simulations = 4
+    num_considered_actions::Int = 2
     mcts_value_scale::Float32 =1.0f0
     mcts_max_visit_init::Int = 50
 
@@ -159,7 +159,7 @@ function create_config()
     collapse_tau_move = 35
 
     # NN Training variables
-    replay_buffer_size = num_envs * 300
+    replay_buffer_size = num_envs * 200
     min_train_samples = 1_000
     train_freq = num_envs * 50
     adam_learning_rate = 1e-3
@@ -177,10 +177,10 @@ function create_config()
 
     # Evaluation variables
     evaluation_fns = get_eval_fns()
-    eval_freq = num_envs * 200
+    eval_freq = num_envs * 1000
 
     # Total train steps
-    num_steps = num_envs * 10000
+    num_steps = num_envs * 5000
 
     return TrainConfig(;
         EnvCls=EnvCls,

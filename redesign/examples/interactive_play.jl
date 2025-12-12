@@ -12,14 +12,19 @@ const MCTS = BatchedMcts
 
 # set these constants to your preference
 const DEVICE = CPU()
-const MODEL_PATH = "examples/models_nnue/connect-four-checkpoints/model_007700.jld2"
-const nn_config = SimpleNetHP(width=192, depth_common=1)
+const MODEL_PATH = "examples/models/connect-four-checkpoints/model_098000.jld2"
+const nn_config = SimpleResNetHP(
+    width=512,
+    depth_common=6,
+    depth_vhead=1,
+    depth_phead=1
+)
 
 
 function load_nn()
     state_dim = BatchedEnvs.state_size(BitwiseConnectFourEnv)
     action_dim = BatchedEnvs.num_actions(BitwiseConnectFourEnv)
-    nn = SimpleNet(state_dim..., action_dim, nn_config)
+    nn = SimpleResNet(state_dim..., action_dim, nn_config)
 
     model_state = JLD2.load(MODEL_PATH, "model_state");
     Flux.loadmodel!(nn, model_state);
@@ -142,16 +147,16 @@ nn = load_nn()
 mcts_kwargs = (;
     # common MCTS variables
     use_gumbel_mcts = false,
-    num_simulations = 20000,
+    num_simulations = 600,
 
     # Gumbel MCTS variables -- No need to set those since we're using traditional MCTS,
     #   but they're here for completeness
-    num_considered_actions = 7,
+    num_considered_actions = 9,
     mcts_value_scale = 1f0,
     mcts_max_visit_init = 50,
 
     # AlphaZero MCTS variable
-    c_puct = 2.0f0,
+    c_puct = 1.0f0,
     alpha_dirichlet = 0.0f0,
     epsilon_dirichlet = 0.0f0,
     tau = 1.0f0,
@@ -159,119 +164,9 @@ mcts_kwargs = (;
 )
 
 # # play against MCTS
- #play_with_mcts(nn, mcts_kwargs, true)
+ play_with_mcts(nn, mcts_kwargs, true)
 
 # play against the neural network
 #play_with_nn(nn, true)
 
 
-
-function BinaryToBase16k(p)
-
-    out = UInt16[]
-    code = 0
-
-    for (k, bytevalue) in enumerate(p)
-        i = (k - 1) % 7
-        byteValue = UInt16(reinterpret(UInt8, bytevalue))
-        if i == 0
-            code = byteValue << 6
-        elseif i == 1
-            code |= byteValue >> 2
-            code += 0x5000
-            push!(out, code)
-            code = (byteValue & 3) << 12
-        elseif i == 2
-            code |= byteValue << 4
-
-        elseif i == 3
-            code |= byteValue >> 4
-            code += 0x5000
-            push!(out, code)
-            code = (byteValue & 0xf) << 10
-        elseif i == 4
-            code |= byteValue << 2
-        elseif i == 5
-            code |= byteValue >> 6
-            code += 0x5000
-            push!(out, code)
-            code = (byteValue & 0x3f) << 8
-
-        elseif i == 6
-            code |= byteValue
-            code += 0x5000
-            push!(out, code)
-            code = 0
-        end
-    end
-
-
-    if (length(p) % 7 != 0)
-        code += 0x5000
-        push!(out, code)
-    end
-
-    return transcode(String, out)
-end
-
-function adapt_weights(reseau, n)
-    C = zeros(Float32, n, 126)
-    b = [(6 - div(i - 1, 9))*9 + (i - 1) % 9+1 for i in 1:63]
-    for i in 1:63
-        C[:, i] .= reseau[1].weight[:, b[i]]
-        C[:, i+63] .= reseau[1].weight[:, b[i]+63]
-    end
-    reseau[1].weight .= C
-end
-
-function weight_quant(d, index)
-    QA = 127
-    QB = 512
-    OFF = 5000
-    w = round.(Int8, QA * d[1].weight)
-    ws = BinaryToBase16k(reshape(w, length(w)))
-    b = round.(UInt16, (QA * d[1].bias .+ OFF)) .+ 0x5000
-    bs = transcode(String, reshape(b, length(b)))
-
-    open("/home/fabrice/C++/CodinGame/weights$index.dat", "w") do io
-        write(io, "wstring w0=L\"")
-        write(io, ws)
-        write(io, "\";\n")
-        write(io, "wstring b0 =L\"")
-        write(io, bs)
-        write(io, "\";\n")
-
-        # write(io, "wstring wp=L\"")
-        # write(io, wsp)
-        # write(io, "\";\n")
-        # write(io, "wstring bp =L\"")
-        # write(io, bsp)
-        # write(io, "\";\n")
-    end
-
-    for i in 2:length(d)
-        if i < 2
-
-            w = round.(Int8, (64 * d[i].weight))
-            ws = BinaryToBase16k(reshape(transpose(w), length(w)))
-        else
-
-            w = round.(UInt16, (QB* d[i].weight .+ OFF)) .+ 0x5000
-            ws = transcode(String, reshape(transpose(w), length(w)))
-        end
-
-        b = round.(UInt16, (QB * d[i].bias .+ OFF)) .+ 0x5000
-        bs = transcode(String, reshape(b, length(b)))
-        id = i - 1
-        open("/home/fabrice/C++/CodinGame/weights$index.dat", "a") do io
-            write(io, "wstring w$id =L\"")
-            write(io, ws)
-            write(io, "\";\n")
-
-            write(io, "wstring b$id =L\"")
-            write(io, bs)
-            write(io, "\";\n")
-        end
-    end
-
-end
