@@ -63,7 +63,7 @@ julia> tree = BatchedMcts.explore(mcts_config, envs)  # or gumbel_explore, alpha
 (https://www.deepmind.com/publications/policy-improvement-by-planning-with-gumbel)
 """
 module BatchedMcts
-
+using AcceleratedKernels
 using Adapt: @adapt_structure
 using Base: @kwdef, size
 using CUDA: @inbounds
@@ -81,7 +81,7 @@ using ..Util.Devices.KernelFuns: sum, argmax, maximum, softmax, categorical_samp
 
 export gumbel_explore, explore
 export gumbel_policy, evaluation_policy
-export get_root_children_visits, get_completed_qvalues, get_root_ipolicy
+export get_root_children_visits, get_completed_qvalues, get_root_improved_policy
 
 
 # # Tree datastructure
@@ -278,7 +278,7 @@ function add_dirichlet_noise_to_root!(tree, mcts_config, rng, ::Val{A}) where {A
     dist = Dirichlet(A, mcts_config.alpha_dirichlet)
     noise = DeviceArray(mcts_config.device)(hcat(rand(rng, dist, (batch_size(tree),))...))
     ϵ = mcts_config.epsilon_dirichlet
-    Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
+    AcceleratedKernels.foraxes(noise,3) do bid
         policy_prior = SVector{A}(imap(aid -> tree.policy_prior[aid, ROOT, bid], 1:A))
         bid_noise = SVector{A}(imap(aid -> noise[aid, bid], 1:A))
         action_mask = SVector{A}(imap(aid -> tree.valid_actions[aid, ROOT, bid], 1:A))
@@ -425,23 +425,7 @@ function completed_qvalues(
     return SVector{A}(ret)
 end
 
-# function log_completed_qvalues(
-#     tree,
-#     cid,
-#     bid,
-#     num_actions::Val{A};
-#     invalid_actions_value = -Inf32
-# ) where {A}
-#     root_value=clamp(root_value_estimate(tree, cid, bid, num_actions),-0.99f0,0.99f0)
-#     log_root_value = atanh(root_value)
-#     ret = imap(1:A) do aid
-#         (!tree.valid_actions[aid, cid, bid]) && return invalid_actions_value
 
-#         cnid = tree.children[aid, cid, bid]
-#         return cnid != UNVISITED ? atanh(clamp(qvalue(tree, cnid, bid),-0.99f0,0.99f0)) : log_root_value
-#     end
-#     return SVector{A}(ret)
-# end
 """
     alphazero_qvalues(tree, cid, bid, ::Val{A}) where {A}
 
@@ -534,26 +518,6 @@ Computes q-values (action scores), indicating how favorable each action is for a
 # Returns
 - An SVector of size (num_actions,) containing the transformed qvalues for each action.
 """
-# function transformed_qvalues(
-#     c_scale,
-#     c_visit,
-#     tree,
-#     cid,
-#     bid,
-#     num_actions::Val{A},
-#     invalid_actions_value = -Inf32
-# ) where {A}
-   
-#     root_value = root_value_estimate(tree, cid, bid, num_actions)
-  
-#     ret = imap(1:A) do aid
-#         (!tree.valid_actions[aid, cid, bid]) && return invalid_actions_value
-
-#         cnid = tree.children[aid, cid, bid]
-#         return cnid != UNVISITED ? (qvalue(tree, cnid, bid)-root_value)* sqrt(Float32(tree.num_visits[cnid, bid])) : 0.0f0
-#     end
-#     return SVector{A}(ret)
-#  end
 function transformed_qvalues(
     c_scale,
     c_visit,
@@ -564,12 +528,6 @@ function transformed_qvalues(
 ) where {A}
    
     qvalues = completed_qvalues(tree, cid, bid, num_actions)
- 
-    #root_value=root_value_estimate(tree, cid, bid, num_actions)
-    
-    #σ=μ(qvalues;init=root_value)
-    #scale with visit child
-   
     qcoefficient = qcoeff(c_scale, c_visit, tree, cid, bid, num_actions)
    
     σ_q = qcoefficient * qvalues
@@ -821,7 +779,7 @@ function search(mcts_config, tree)
     c_puct = use_gumbel ? 0f0 : mcts_config.c_puct
 
     parent_frontier = zeros(Int16, mcts_config.device, (2, batch_size(tree)))
-    Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
+    AcceleratedKernels.foraxes(parent_frontier,2) do  bid
         if use_gumbel
             new_frontier = gumbel_search(c_scale, c_visit, tree, bid, num_actions)
         else
@@ -917,7 +875,7 @@ function eval!(mcts_config, tree, simnum, parent_frontier)
 
     # get terminal nodes at `parent_frontier`
     non_terminal_mask = parent_frontier[ACTION, :] .!= NO_ACTION
-    non_terminal_bids = DeviceArray(mcts_config.device)(@view((1:B)[Array(non_terminal_mask)]))
+    non_terminal_bids = findall(non_terminal_mask)
     # No new node to expand (a.k.a only terminal node on the frontier)
     (length(non_terminal_bids) == 0) && return parent_frontier[PARENT, :]
 
@@ -945,8 +903,9 @@ function eval!(mcts_config, tree, simnum, parent_frontier)
     @inbounds tree.value_prior[simnum, non_terminal_bids] = info.value_prior
 
     # value priors are from the perspective of child nodes -> negate sign if needed
-    Devices.foreach(non_terminal_bids, mcts_config.device) do bid
-        @inbounds (tree.prev_switched[simnum, bid]) && (tree.value_prior[simnum, bid] *= -1)
+    AcceleratedKernels.foreachindex(non_terminal_bids) do bid
+        @inbounds cid=non_terminal_bids[bid]
+        @inbounds (tree.prev_switched[simnum, cid]) && (tree.value_prior[simnum, cid] *= -1)
     end
 
     # Update frontier
@@ -973,7 +932,7 @@ environments.
 
 """
 function backpropagate!(mcts_config, tree, frontier)
-    Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
+    AcceleratedKernels.foreachindex(frontier) do bid
         @inbounds cid = frontier[bid]
         @inbounds val = tree.value_prior[cid, bid]
         while true
@@ -1006,7 +965,7 @@ function gumbel_select(mcts_config, tree, simnum, gumbel, considered_visits_tabl
     num_considered_actions = mcts_config.num_considered_actions
 
     parent_frontier = zeros(Int16, mcts_config.device, 2, batch_size(tree))
-    Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
+    AcceleratedKernels.foraxes(parent_frontier,2) do bid
         aid = gumbel_select_root_action(
             c_scale,
             c_visit,
@@ -1186,53 +1145,19 @@ Returns an array of size (num_envs,) containing the resulting actions selected
 by the sequential halving procedure with gumbel for each environment. This function should
 be used after `gumbel_explore()` has been run.
 """
-function gumbel_policy(tree, mcts_config, gumbel)#,current_steps,rng::AbstractRNG)
+function gumbel_policy(tree, mcts_config, gumbel)
     num_actions = Val(n_actions(tree))
     c_scale, c_visit = mcts_config.value_scale, mcts_config.max_visit_init
 
     actions = zeros(Int16, mcts_config.device, batch_size(tree))
-    Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
+    AcceleratedKernels.foreachindex(actions) do bid
         actions[bid] = gumbel_mcts_action(c_scale, c_visit, tree, bid, gumbel, num_actions)
     end
-   # policy=get_ipolicy(tree,c_scale,c_visit,bid,num_actions,t)
     return actions
-#     num_actions = Val(n_actions(tree))
-# #    τ = mcts_config.tau
-#  #   deterministic_move_idx = mcts_config.collapse_tau_move
-#     c_scale, c_visit = mcts_config.value_scale, mcts_config.max_visit_init
-#     probs = DeviceArray(mcts_config.device)(rand(rng, Float32, batch_size(tree)))
-#     actions = zeros(Int16, mcts_config.device, batch_size(tree))
-#     Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
-#         if current_steps[bid] >= 30#deterministic_move_idx 
-#             t=0.3f0
-#         else
-#             t=1.0f0
-#         end
-#         policy=get_ipolicy(tree,c_scale,c_visit,bid,num_actions,t)
-#         actions[bid] = categorical_sample(policy, probs[bid])#gumbel_mcts_action(c_scale, c_visit, tree, bid, gumbel, num_actions)
-#     end
-
-#     return actions
 end
 
 
-# function gumbel_policy(tree, mcts_config, gumbel,current_steps,rng::AbstractRNG)
 
-#     num_actions = Val(n_actions(tree))
-# #    τ = mcts_config.tau
-#  #   deterministic_move_idx = mcts_config.collapse_tau_move
-#     c_scale, c_visit = mcts_config.value_scale, mcts_config.max_visit_init
-#     probs = DeviceArray(mcts_config.device)(rand(rng, Float32, batch_size(tree)))
-#     actions = zeros(Int16, mcts_config.device, batch_size(tree))
-#     Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
-#         λ=exp(-current_steps[bid]/8)
-#         t=1.0f0*λ+(1-λ)(0.3f0)
-#         policy=get_ipolicy(tree,c_scale,c_visit,bid,num_actions,t)
-#         actions[bid] = categorical_sample(policy, probs[bid])#gumbel_mcts_action(c_scale, c_visit, tree, bid, gumbel, num_actions)
-#     end
-
-#     return actions
-# end
 """
     alphazero_policy(tree, mcts_config, rng::AbstractRNG)
 
@@ -1247,7 +1172,7 @@ function alphazero_policy(tree, mcts_config, current_steps, rng::AbstractRNG)
     probs = DeviceArray(mcts_config.device)(rand(rng, Float32, batch_size(tree)))
 
     actions = zeros(Int16, mcts_config.device, batch_size(tree))
-    Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
+    AcceleratedKernels.foreachindex(actions) do bid
         children_visit_counts = get_num_child_visits(tree, ROOT, bid, num_actions)
         if current_steps[bid] >= deterministic_move_idx || τ == 0f0
             actions[bid] = Int16(argmax(children_visit_counts; init=(NO_ACTION, UNVISITED)))
@@ -1272,7 +1197,7 @@ function evaluation_policy(tree, mcts_config)
     num_actions = Val(n_actions(tree))
 
     actions = zeros(Int16, mcts_config.device, batch_size(tree))
-    Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
+    AcceleratedKernels.foreachindex(actions) do bid
         children_visit_counts = get_num_child_visits(tree, ROOT, bid, num_actions)
         actions[bid] = Int16(argmax(children_visit_counts; init=(NO_ACTION, UNVISITED)))
     end
@@ -1281,33 +1206,45 @@ function evaluation_policy(tree, mcts_config)
 end
 
 """
-    get_root_children_visits(tree, mcts_config)
-
-Returns an array of size (num_actions, num_envs) containing the number of visits for
-each action at the root node for each environment. This function should be used after
-`gumbel_explore()` or `explore()` has been run.
+    get_improved_policy(tree,c_scale,c_visit, bid, num_actions::Val{A},τ=1.0f0) where {A}
+Returns an SVector containing the improved policy (from gumbel) at node bid, eventually using a temperature τ. 
 """
-function get_ipolicy(tree,c_scale,c_visit, bid, num_actions::Val{A},τ=1.1f0) where {A}
+function get_improved_policy(tree,c_scale,c_visit, bid, num_actions::Val{A},τ=1.0f0) where {A}
     logits = SVector{A}(imap(aid -> tree.valid_actions[aid, 1, bid] ? tree.logit_prior[aid, 1, bid]/τ : -Inf32, 1:A))+
     transformed_qvalues(c_scale, c_visit, tree, 1, bid, num_actions)
     return softmax(logits)
 end
-function get_root_ipolicy(tree, mcts_config,c_scale=0.1f0,c_visit=50)
-    # compute the policy: π′ = softmax(logits + σ(completedQ))
+
+
+"""
+    get_root_improved_policy(tree, mcts_config,c_scale=0.1f0,c_visit=50)
+
+Returns an array of size (num_actions, num_envs) containing the improved policy
+at the root node for each environment. This function should be used after
+`gumbel_explore()`  has been run.
+"""
+function get_root_improved_policy(tree, mcts_config,c_scale=0.1f0,c_visit=50)
+  
     num_actions = Val(n_actions(tree))
-    #c_scale, c_visit = mcts_config.value_scale, mcts_config.max_visit_init
+    
     ipolicy=zeros(Float32, mcts_config.device, (n_actions(tree), batch_size(tree)))
-    Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
-        ipolicy[:,bid] .= get_ipolicy(tree,c_scale,c_visit,bid,num_actions)
+    AcceleratedKernels.foraxes(ipolicy,2) do bid
+        ipolicy[:,bid] .= get_improved_policy(tree,c_scale,c_visit,bid,num_actions)
     end
     ipolicy
 end
 
+"""
+    get_root_children_visits(tree, mcts_config)
+
+Returns an array of size (num_actions, num_envs) containing the number of visits for
+each action at the root node for each environment. This function should be used after
+`explore()` has been run.
+"""
 function get_root_children_visits(tree, mcts_config)
     num_actions = Val(n_actions(tree))
-
     visits = zeros(Int16, mcts_config.device, (n_actions(tree), batch_size(tree)))
-    Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
+    AcceleratedKernels.foraxes(visits,2) do bid
         visits[:, bid] .= get_num_child_visits(tree, ROOT, bid, num_actions)
     end
 
@@ -1325,7 +1262,7 @@ function get_completed_qvalues(tree, mcts_config)
     num_actions = Val(n_actions(tree))
 
     qvalues = zeros(Float32, mcts_config.device, (n_actions(tree), batch_size(tree)))
-    Devices.foreach(1:batch_size(tree), mcts_config.device) do bid
+   AcceleratedKernels.foraxes(qvalues,2) do bid
         qvalues[:, bid] .= completed_qvalues(tree, ROOT, bid, num_actions)
     end
 

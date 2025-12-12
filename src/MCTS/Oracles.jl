@@ -32,7 +32,7 @@ initial_state = oracle.init_fn(envs)
 ```
 """
 module EnvOracles
-
+using AcceleratedKernels
 using CUDA
 using Flux
 
@@ -144,7 +144,7 @@ function neural_network_env_oracle(; nn::Net) where Net <: FluxNetwork
         device = Devices.get_device(envs)
 
         states = zeros(Float32, device, BatchedEnvs.state_size(eltype(envs))..., num_envs)
-        Devices.foreach(1:num_envs, device) do env_id
+        AcceleratedKernels.foraxes(states,2) do env_id
             @inbounds states[:, env_id] .= BatchedEnvs.vectorize_state(envs[env_id])
             return nothing
         end
@@ -172,7 +172,7 @@ function neural_network_env_oracle(; nn::Net) where Net <: FluxNetwork
         new_envs = get_state.(act_info)
 
         states = zeros(Float32, device, BatchedEnvs.state_size(eltype(envs))..., num_envs)
-        Devices.foreach(1:num_envs, device) do env_id
+        AcceleratedKernels.foraxes(states,2) do env_id
             @inbounds states[:, env_id] .= BatchedEnvs.vectorize_state(new_envs[env_id])
             return nothing
         end

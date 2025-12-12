@@ -3,7 +3,7 @@ An batched MCTS implementation that can run on GPU where trees
 are represented in Array of Structs format.
 """
 module BatchedMctsAos
-
+using AcceleratedKernels
 using StaticArrays
 using Distributions: sample, Gumbel
 using Random: AbstractRNG
@@ -76,7 +76,7 @@ end
 function eval_states!(mcts, tree, frontier)
     (; na, ne) = tree_dims(tree)
     prior = (@SVector ones(Float32, na)) / na
-    Devices.foreach(1:ne, mcts.device) do batchnum
+    AcceleratedKernels.foreachindex(frontier) do batchnum
         nid = frontier[batchnum]
         node = tree[batchnum, nid]
         if !node.terminal
