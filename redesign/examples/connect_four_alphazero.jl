@@ -146,8 +146,9 @@ function create_config()
     num_simulations = 4
     num_considered_actions::Int = 2
     mcts_value_scale::Float32 =1.0f0
+    mcts_value_scale_root::Float32=0.5f0
     mcts_max_visit_init::Int = 50
-
+    mcts_temperature::Float32=1.1f0
     # Gumbel MCTS variables
     # ...we can omit these since we're using Traditional Alphazero MCTS
 
@@ -177,7 +178,7 @@ function create_config()
 
     # Evaluation variables
     evaluation_fns = get_eval_fns()
-    eval_freq = num_envs * 1000
+    eval_freq = num_envs * 500
 
     # Total train steps
     num_steps = num_envs * 5000
@@ -189,8 +190,10 @@ function create_config()
 
         use_gumbel_mcts=use_gumbel_mcts,
         num_considered_actions=num_considered_actions,
-        mcts_value_scale=mcts_value_scale,
         mcts_max_visit_init=mcts_max_visit_init,
+        mcts_value_scale=mcts_value_scale,
+        mcts_value_scale_root=mcts_value_scale_root,
+        mcts_temperature= mcts_temperature,
         num_simulations=num_simulations,
 
         c_puct=c_puct,

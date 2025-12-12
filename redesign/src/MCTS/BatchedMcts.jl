@@ -1217,19 +1217,22 @@ end
 
 
 """
-    get_root_improved_policy(tree, mcts_config,c_scale=0.1f0,c_visit=50)
+    get_root_improved_policy(tree, mcts_config)
 
 Returns an array of size (num_actions, num_envs) containing the improved policy
 at the root node for each environment. This function should be used after
 `gumbel_explore()`  has been run.
 """
-function get_root_improved_policy(tree, mcts_config,c_scale=0.1f0,c_visit=50)
+function get_root_improved_policy(tree, mcts_config)
   
     num_actions = Val(n_actions(tree))
     
     ipolicy=zeros(Float32, mcts_config.device, (n_actions(tree), batch_size(tree)))
+    c_scale=mcts_config.value_scale_root
+    max_visit=mcts_config.max_visit_init
+    temperature=mcts_config.temperature
     AcceleratedKernels.foraxes(ipolicy,2) do bid
-        ipolicy[:,bid] .= get_improved_policy(tree,c_scale,c_visit,bid,num_actions)
+        ipolicy[:,bid] .= get_improved_policy(tree,c_scale,max_visit,bid,num_actions,temperature)
     end
     ipolicy
 end
@@ -1262,7 +1265,7 @@ function get_completed_qvalues(tree, mcts_config)
     num_actions = Val(n_actions(tree))
 
     qvalues = zeros(Float32, mcts_config.device, (n_actions(tree), batch_size(tree)))
-   AcceleratedKernels.foraxes(qvalues,2) do bid
+    AcceleratedKernels.foraxes(qvalues,2) do bid
         qvalues[:, bid] .= completed_qvalues(tree, ROOT, bid, num_actions)
     end
 
