@@ -11,6 +11,9 @@ include("Envs/BitwiseTicTacToe.jl")
 include("Envs/BitwiseConnectFour.jl")
 @reexport using .BitwiseConnectFour
 
+include("Envs/BitwiseHex.jl")
+@reexport using .BitwiseHex
+
 include("TestEnvs.jl")
 @reexport using .TestEnvs
 
@@ -28,5 +31,8 @@ include("Evaluation/EvaluationFunctions/BitwiseTicTacToeEvaluationFns.jl")
 
 include("Evaluation/EvaluationFunctions/BitwiseConnectFourEvaluationFns.jl")
 @reexport using .BitwiseConnectFourEvalFns
+
+include("Evaluation/EvaluationFunctions/BitwiseHexEvaluationFns.jl")
+@reexport using .BitwiseHexEvalFns
 
 end

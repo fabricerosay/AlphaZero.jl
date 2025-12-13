@@ -138,7 +138,9 @@ Note: The two types of implemented MCTS algorithms can be found in the following
     # Gumbel MCTS variables
     num_considered_actions::Int = 9
     mcts_value_scale::Float32 = 0.1f0
+    mcts_value_scale_root::Float32 = 0.1f0
     mcts_max_visit_init::Int = 50
+    mcts_temperature::Float32 =1.2f0
 
     # AlphaZero MCTS variables
     c_puct::Float32 = 1.0f0
@@ -205,7 +207,9 @@ function init_mcts_config(device::Device, nn::Net, config) where Net <: FluxNetw
             num_simulations=config.num_simulations,
             num_considered_actions=config.num_considered_actions,
             value_scale=config.mcts_value_scale,
-            max_visit_init=config.mcts_max_visit_init
+            value_scale_root=config.mcts_value_scale_root,
+            max_visit_init=config.mcts_max_visit_init,
+            temperature=config.mcts_temperature
         )
     else
         return AlphaZeroMctsConfig(;

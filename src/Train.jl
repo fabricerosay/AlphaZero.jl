@@ -254,7 +254,7 @@ function selfplay!(config, device, nn, print_progress=true)
             times.explore_times[step] = t
 
             t = @elapsed begin
-                actions = MCTS.gumbel_policy(tree, mcts_config, gumbel)#,mcts_rng)
+                actions = MCTS.gumbel_policy(tree, mcts_config,gumbel)#steps_counter,mcts_rng)#, gumbel)
                 policy= get_root_improved_policy(tree, mcts_config)|>cpu
                 policy=[SVector{num_actions}(policy[:,k]) for k in 1:size(policy)[2]]
             end

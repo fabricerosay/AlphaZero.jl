@@ -3,19 +3,19 @@ using RLZero.BatchedEnvs
 using RLZero.Network
 using RLZero.Train
 using RLZero.TrainUtilities: TrainConfig, get_train_timestamps, print_execution_times
-using RLZero.Tests.Common.BitwiseConnectFour
-using RLZero.Tests.Common.BitwiseConnectFourEvalFns
+using RLZero.Tests.Common.BitwiseHex
+using RLZero.Tests.Common.BitwiseHexEvalFns
 using RLZero.Util.Devices
 
 using JLD2
 using Flux
 using Random
 
-const SAVEDIR = "examples/models/connect-four-checkpoints"
-const PLOTSDIR = "examples/plots/connect-four"
+const SAVEDIR = "examples/models/hex-checkpoints"
+const PLOTSDIR = "examples/plots/hex-four"
 
-state_dim = BatchedEnvs.state_size(BitwiseConnectFourEnv)
-action_dim = BatchedEnvs.num_actions(BitwiseConnectFourEnv)
+state_dim = BatchedEnvs.state_size(BitwiseHexEnv)
+action_dim = BatchedEnvs.num_actions(BitwiseHexEnv)
 
 # large architecture
 const MODEL_PATH = "examples/models/connect-four-checkpoints/model_020900.jld2"
@@ -29,8 +29,8 @@ nn_cpu = SimpleResNet(state_dim..., action_dim, neural_net_hyperparams)
 
 
 function load_nn()
-    state_dim = BatchedEnvs.state_size(BitwiseConnectFourEnv)
-    action_dim = BatchedEnvs.num_actions(BitwiseConnectFourEnv)
+    state_dim = BatchedEnvs.state_size(BitwiseHexEnv)
+    action_dim = BatchedEnvs.num_actions(BitwiseHexEnv)
     nn = SimpleResNet(state_dim..., action_dim, neural_net_hyperparams)
 
     model_state = JLD2.load(MODEL_PATH, "model_state");
@@ -110,25 +110,25 @@ function get_eval_fns()
     #    metrics
   # )
     nn_vs_random_eval_fn = get_nn_vs_random_eval_fn(nn_vs_random_kwargs, metrics)
-    alphazero_vs_minimax_eval_fn = get_alphazero_vs_minimax_eval_fn(
-    az_vs_minimax_kwargs,
-    metrics
-    )
-    nn_vs_minimax_eval_fn = get_nn_vs_minimax_eval_fn(nn_vs_minimax_kwargs, metrics)
-    fns = get_connect_four_benchmark_fns(benchmark_fns_kwargs, metrics)
-    mcts_benchmark_fn, nn_benchmark_fn = fns
-    fns = get_pons_benchmark_fns(pos_benchmark_fns_kwargs, metrics)
-    az_pons_benchmark_fn, nn_pons_benchmark_fn = fns
+   # alphazero_vs_minimax_eval_fn = get_alphazero_vs_minimax_eval_fn(
+    #az_vs_minimax_kwargs,
+    #metrics
+    #)
+   # nn_vs_minimax_eval_fn = get_nn_vs_minimax_eval_fn(nn_vs_minimax_kwargs, metrics)
+    #fns = get_connect_four_benchmark_fns(benchmark_fns_kwargs, metrics)
+    #mcts_benchmark_fn, nn_benchmark_fn = fns
+    #fns = get_pons_benchmark_fns(pos_benchmark_fns_kwargs, metrics)
+    #az_pons_benchmark_fn, nn_pons_benchmark_fn = fns
 
     return [
         #alphazero_vs_random_eval_fn,
-        #nn_vs_random_eval_fn,
+        nn_vs_random_eval_fn,
         #alphazero_vs_minimax_eval_fn,
         #nn_vs_minimax_eval_fn,
-        mcts_benchmark_fn,
-        nn_benchmark_fn,
-        az_pons_benchmark_fn,
-        nn_pons_benchmark_fn
+        #mcts_benchmark_fn,
+        #nn_benchmark_fn,
+        #az_pons_benchmark_fn,
+        #nn_pons_benchmark_fn
     ]
 end
 
@@ -137,18 +137,18 @@ end
 function create_config()
 
     # environment variables
-    EnvCls = BitwiseConnectFourEnv
+    EnvCls = BitwiseHexEnv
     env_kwargs = Dict()
-    num_envs = 30_000
+    num_envs = 20_000
 
     # common MCTS variables
     use_gumbel_mcts = true
-    num_simulations = 4
-    num_considered_actions::Int = 2
+    num_simulations = 16
+    num_considered_actions::Int = 8
     mcts_value_scale::Float32 =1.0f0
     mcts_value_scale_root::Float32=1.0f0
     mcts_max_visit_init::Int = 50
-    mcts_temperature::Float32=1.1f0
+    mcts_temperature::Float32=1.0f0
     # Gumbel MCTS variables
     # ...we can omit these since we're using Traditional Alphazero MCTS
 
@@ -178,7 +178,7 @@ function create_config()
 
     # Evaluation variables
     evaluation_fns = get_eval_fns()
-    eval_freq = num_envs * 1000
+    eval_freq = num_envs * 100
 
     # Total train steps
     num_steps = num_envs * 10000

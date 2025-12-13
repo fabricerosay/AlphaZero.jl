@@ -8,4 +8,6 @@ include("StaticBitArrays.jl")
 include("Devices.jl")
 @reexport using .Devices: Devices, CPU, GPU
 
+include("Bitboard.jl")
+@reexport using .Bitboard
 end

@@ -14,6 +14,7 @@ using .BitwiseTicTacToeTests: run_bitwise_tictactoe_tests
 include("BitwiseConnectFourTests.jl")
 using .BitwiseConnectFourTests: run_bitwise_connect_four_tests
 
+
 export run_env_tests
 
 function run_env_tests()
