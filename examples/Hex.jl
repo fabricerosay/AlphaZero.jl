@@ -143,8 +143,8 @@ function create_config()
 
     # common MCTS variables
     use_gumbel_mcts = true
-    num_simulations = 16
-    num_considered_actions::Int = 8
+    num_simulations = 32
+    num_considered_actions::Int = 16
     mcts_value_scale::Float32 =1.0f0
     mcts_value_scale_root::Float32=1.0f0
     mcts_max_visit_init::Int = 50
@@ -162,11 +162,11 @@ function create_config()
     # NN Training variables
     replay_buffer_size = num_envs * 200
     min_train_samples = 1_000
-    train_freq = num_envs * 50
-    adam_learning_rate = 1e-3
+    train_freq = num_envs * 100
+    adam_learning_rate = 1e-4
     weight_decay = 1e-6
     batch_size = 4096
-    train_epochs = 2
+    train_epochs = 1
 
     # Logging variables
     train_logfile = "train.log"
@@ -181,7 +181,7 @@ function create_config()
     eval_freq = num_envs * 100
 
     # Total train steps
-    num_steps = num_envs * 10000
+    num_steps = num_envs * 50000
 
     return TrainConfig(;
         EnvCls=EnvCls,

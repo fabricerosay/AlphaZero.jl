@@ -11,7 +11,7 @@ using JLD2
 const MCTS = BatchedMcts
 
 
-const N = 7
+const N = 9
 const A_CODE = Int('A') # ASCII code for 'A'
 
 # --- Indexing Function (copied from BitwiseHexEnv) ---
@@ -97,7 +97,7 @@ function flat_to_alg(n)::Union{String, Nothing}
 end
 # set these constants to your preference
 const DEVICE = CPU()
-const MODEL_PATH = "examples/models/hex-checkpoints/model_05000.jld2"
+const MODEL_PATH = "examples/models/hex-checkpoints/model_10700.jld2"
 const nn_config = SimpleResNetHP(
     width=512,
     depth_common=6,
@@ -244,7 +244,7 @@ mcts_kwargs = (;
     mcts_max_visit_init = 50,
 
     # AlphaZero MCTS variable
-    c_puct = 1.0f0,
+    c_puct = 1.5f0,
     alpha_dirichlet = 0.0f0,
     epsilon_dirichlet = 0.0f0,
     tau = 1.0f0,

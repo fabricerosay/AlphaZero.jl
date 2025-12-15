@@ -241,7 +241,7 @@ function selfplay!(config, device, nn, print_progress=true)
     (config.nn_save_dir != "") && save_nn(nn, config.nn_save_dir, 0, batch_steps)
 
     times = TrainExecutionTimes(batch_steps)
-
+    lr=config.adam_lr
     for step in 1:batch_steps
         print_progress && println("Step: $step.")
 
@@ -284,7 +284,10 @@ function selfplay!(config, device, nn, print_progress=true)
                 set_train_mode!(nn)
                 nn = train!(nn, rp_buff, opt, device, config, loggers, train_rng)
                 set_test_mode!(nn)
+                lr=min(0.001f0,1.4f0*lr)
+                Optimisers.adjust!(opt, lr)
             end
+            
             # if step % (batch_train_freq)==0
             #     rescale(nn)
             # end

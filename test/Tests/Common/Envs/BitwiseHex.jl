@@ -7,7 +7,7 @@ using ....Util.Bitboard
 
 export BitwiseHexEnv
 
-const N=7
+const N=9
 const NN=N*N
 const VectorizedState=(N+1)*(N+1)
 const maxActions=NN
