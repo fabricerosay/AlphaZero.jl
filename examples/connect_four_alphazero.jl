@@ -19,13 +19,13 @@ action_dim = BatchedEnvs.num_actions(BitwiseConnectFourEnv)
 
 # large architecture
 const MODEL_PATH = "examples/models/connect-four-checkpoints/model_020900.jld2"
-neural_net_hyperparams = KanResNetHP(
-    width=64,
-    depth_common=4,
+neural_net_hyperparams = SimpleResNetHP(
+    width=512,
+    depth_common=6,
     depth_vhead=1,
     depth_phead=1
 )
-nn_cpu = KanResNet(state_dim..., action_dim, neural_net_hyperparams)
+nn_cpu = SimpleResNet(state_dim..., action_dim, neural_net_hyperparams)
 
 # neural_net_hyperparams=RRTNetHP(
 #     entry=(6,7,2),
@@ -145,11 +145,11 @@ function create_config()
     # environment variables
     EnvCls = BitwiseConnectFourEnv
     env_kwargs = Dict()
-    num_envs = 10_000
+    num_envs = 40_000
 
     # common MCTS variables
     use_gumbel_mcts = true
-    num_simulations = 4
+    num_simulations = 16
     num_considered_actions::Int = 2
     mcts_value_scale::Float32 =1.0f0
     mcts_value_scale_root::Float32=0.1f0
