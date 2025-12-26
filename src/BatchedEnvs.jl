@@ -32,7 +32,7 @@ The environment implementations must be GPU-friendly, which means that:
 module BatchedEnvs
 
 
-export state_size, num_actions, valid_action, act, terminated, vectorize_state
+export state_size, num_actions, valid_action, act, terminated, vectorize_state, masks
 
 
 """
@@ -86,5 +86,12 @@ Converts the current state of the environment instance `env` to a vectorized for
 The return type must be a StaticArray with the same size as specified in `state_size()`.
 """
 function vectorize_state end
+
+""" 
+    masks(env)
+
+Returns a StaticArray onehotencoding the playable actions. It has the same dimension as policy
+"""
+function masks end
 
 end

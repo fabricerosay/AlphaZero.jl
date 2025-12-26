@@ -7,7 +7,7 @@ using ....Util.Bitboard
 
 export BitwiseHexEnv
 
-const N=9
+const N=7
 const NN=N*N
 const VectorizedState=(N+1)*(N+1)
 const maxActions=NN
@@ -65,10 +65,30 @@ BitwiseHexEnv()=BitwiseHexEnv(startx,starto,1,NN)
 An action is an integer from 1 to NN, representing the flat index
 of the cell to be played.
 """
+function pov_action(action,player)
+	if player==1
+		return action
+	else
+		x=div(action-1,N)
+		y=action-1-N*x
+		return N*y+x+1
+	end
+end
+
+function big_pov_action(action,player)
+	if player==1
+		return action
+	else
+		x=div(action-1,N+1)
+		y=action-1-(N+1)*x
+		return (N+1)*y+x+1
+	end
+end
 
 function BatchedEnvs.act(env::BitwiseHexEnv, action)
-	x=div(action-1,N)
-	y=action-N*x
+	pov_act=pov_action(action,env.player)
+	x=div(pov_act-1,N)
+	y=pov_act-N*x
 	newcol=(N+1)*(x+1)+y+1
 	bplayer=Bitboard.setindex(env.bplayer,true,newcol)
 	newenv= BitwiseHexEnv(env.bopponent,bplayer,-env.player,env.lp-Int8(1))
@@ -81,8 +101,9 @@ A move is valid if the cell is currently empty.
 The action is the flat index n (1 to N*N).
 """
 function BatchedEnvs.valid_action(env::BitwiseHexEnv, action::Int)
-    x=div(action-1,N)
-	y=action-N*x
+	pov_act=pov_action(action,env.player)
+	x=div(pov_act-1,N)
+	y=pov_act-N*x
 	newcol=(N+1)*(x+1)+y+1
 	return ~env.bplayer[newcol] & ~env.bopponent[newcol]
 end
@@ -121,10 +142,16 @@ The board is represented from the perspective of the next player to play.
 It is a flatten 2xN*N array with the following channels:
     [next player, other player]
 """
+
+
 function BatchedEnvs.vectorize_state(env::BitwiseHexEnv)
-    me=@SVector [env.bplayer[n] for n in 1:VectorizedState]
-    you=@SVector [env.bopponent[n] for n in 1:VectorizedState]
+    me=@SVector [env.bplayer[big_pov_action(n,env.player)] for n in 1:VectorizedState]
+    you=@SVector [env.bopponent[big_pov_action(n,env.player)] for n in 1:VectorizedState]
     return Float32.(reduce(vcat, @SVector [me,you]))
+end
+
+function BatchedEnvs.masks(env::BitwiseHexEnv)
+    return @SVector [valid_action(env,n) for n in 1:maxActions]
 end
 
 end

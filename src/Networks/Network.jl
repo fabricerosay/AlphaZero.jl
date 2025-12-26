@@ -53,6 +53,7 @@ module Network
 
 using CUDA
 using Flux
+using FluxKAN
 using Random: MersenneTwister
 
 using ..Util.Devices: Device, CPU, GPU, arr_is_on_gpu
@@ -62,6 +63,8 @@ export SimpleNet, SimpleNetHP
 export SimpleResNet, SimpleResNetHP
 export NnueNet,NnueNetHP
 export ConvResNet,ConvResNetHP
+export RRTNet,RRTNetHP
+export KanResNet,KanResNetHP
 export on_gpu, forward, to_cpu, to_gpu, set_train_mode!, set_test_mode!,rescale,clamp_nn
 
 
@@ -213,4 +216,6 @@ include("SimpleNet.jl")
 include("SimpleResNet.jl")
 include("NnueNet.jl")
 include("ConvResNet.jl")
+include("TransformersNet.jl")
+include("KanResNet.jl")
 end

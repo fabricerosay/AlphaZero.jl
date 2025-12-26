@@ -19,15 +19,21 @@ action_dim = BatchedEnvs.num_actions(BitwiseConnectFourEnv)
 
 # large architecture
 const MODEL_PATH = "examples/models/connect-four-checkpoints/model_020900.jld2"
-neural_net_hyperparams = SimpleResNetHP(
-    width=512,
-    depth_common=6,
+neural_net_hyperparams = KanResNetHP(
+    width=64,
+    depth_common=4,
     depth_vhead=1,
     depth_phead=1
 )
-nn_cpu = SimpleResNet(state_dim..., action_dim, neural_net_hyperparams)
+nn_cpu = KanResNet(state_dim..., action_dim, neural_net_hyperparams)
 
+# neural_net_hyperparams=RRTNetHP(
+#     entry=(6,7,2),
+#     head_size=32,
+#     num_heads=4
+# )
 
+# nn_cpu=RRTNet(7,neural_net_hyperparams)
 function load_nn()
     state_dim = BatchedEnvs.state_size(BitwiseConnectFourEnv)
     action_dim = BatchedEnvs.num_actions(BitwiseConnectFourEnv)
@@ -139,16 +145,17 @@ function create_config()
     # environment variables
     EnvCls = BitwiseConnectFourEnv
     env_kwargs = Dict()
-    num_envs = 30_000
+    num_envs = 10_000
 
     # common MCTS variables
     use_gumbel_mcts = true
     num_simulations = 4
     num_considered_actions::Int = 2
     mcts_value_scale::Float32 =1.0f0
-    mcts_value_scale_root::Float32=1.0f0
+    mcts_value_scale_root::Float32=0.1f0
     mcts_max_visit_init::Int = 50
-    mcts_temperature::Float32=1.1f0
+    mcts_temperature::Float32=1.2f0
+    mcts_temperature_search::Float32=1.0f0
     # Gumbel MCTS variables
     # ...we can omit these since we're using Traditional Alphazero MCTS
 
@@ -160,13 +167,13 @@ function create_config()
     collapse_tau_move = 35
 
     # NN Training variables
-    replay_buffer_size = num_envs * 200
+    replay_buffer_size = num_envs * 100
     min_train_samples = 1_000
     train_freq = num_envs * 50
     adam_learning_rate = 1e-3
     weight_decay = 1e-6
     batch_size = 4096
-    train_epochs = 2
+    train_epochs = 1
 
     # Logging variables
     train_logfile = "train.log"
@@ -178,10 +185,10 @@ function create_config()
 
     # Evaluation variables
     evaluation_fns = get_eval_fns()
-    eval_freq = num_envs * 1000
+    eval_freq = num_envs * 500
 
     # Total train steps
-    num_steps = num_envs * 10000
+    num_steps = num_envs * 5000
 
     return TrainConfig(;
         EnvCls=EnvCls,
@@ -194,6 +201,7 @@ function create_config()
         mcts_value_scale=mcts_value_scale,
         mcts_value_scale_root=mcts_value_scale_root,
         mcts_temperature= mcts_temperature,
+        mcts_temperature_search=mcts_temperature_search,
         num_simulations=num_simulations,
 
         c_puct=c_puct,

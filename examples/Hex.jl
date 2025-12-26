@@ -18,7 +18,7 @@ state_dim = BatchedEnvs.state_size(BitwiseHexEnv)
 action_dim = BatchedEnvs.num_actions(BitwiseHexEnv)
 
 # large architecture
-const MODEL_PATH = "examples/models/connect-four-checkpoints/model_020900.jld2"
+const MODEL_PATH = "examples/models/hex-checkpoints/model_028950.jld2"
 neural_net_hyperparams = SimpleResNetHP(
     width=512,
     depth_common=6,
@@ -39,6 +39,7 @@ function load_nn()
     return nn
 end
 
+#nn_cpu=load_nn()
 # global lists used to retrieve data from the benchmarks
 metrics = Dict(
     "az" => Dict("random" => [], "minimax" => [], "benchmark" => [], "pons" => []),
@@ -139,16 +140,17 @@ function create_config()
     # environment variables
     EnvCls = BitwiseHexEnv
     env_kwargs = Dict()
-    num_envs = 20_000
+    num_envs = 30_000
 
     # common MCTS variables
     use_gumbel_mcts = true
-    num_simulations = 32
-    num_considered_actions::Int = 16
+    num_simulations = 4
+    num_considered_actions::Int = 8
     mcts_value_scale::Float32 =1.0f0
     mcts_value_scale_root::Float32=1.0f0
     mcts_max_visit_init::Int = 50
     mcts_temperature::Float32=1.0f0
+    mcts_temperature_search::Float32=1.0
     # Gumbel MCTS variables
     # ...we can omit these since we're using Traditional Alphazero MCTS
 
@@ -160,9 +162,9 @@ function create_config()
     collapse_tau_move = 35
 
     # NN Training variables
-    replay_buffer_size = num_envs * 200
+    replay_buffer_size = num_envs * 100
     min_train_samples = 1_000
-    train_freq = num_envs * 100
+    train_freq = num_envs * 50
     adam_learning_rate = 1e-4
     weight_decay = 1e-6
     batch_size = 4096
@@ -181,7 +183,7 @@ function create_config()
     eval_freq = num_envs * 100
 
     # Total train steps
-    num_steps = num_envs * 50000
+    num_steps = num_envs * 10000
 
     return TrainConfig(;
         EnvCls=EnvCls,

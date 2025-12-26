@@ -120,8 +120,12 @@ end
 
 function BatchedEnvs.reset(::BitwiseConnectFourEnv,m)
     env=BitwiseConnectFourEnv()
-    env,_=BatchedEnvs.act(BitwiseConnectFourEnv(),m)
-    
+    action=m%(NUM_COLUMNS+1)-1
+    while action>0
+        env,_=BatchedEnvs.act(BitwiseConnectFourEnv(),action)
+        m=div(m,NUM_COLUMNS+1)
+        action=m%(NUM_COLUMNS+1)-1
+    end
     return env
 end
 
@@ -144,6 +148,10 @@ function BatchedEnvs.vectorize_state(env::BitwiseConnectFourEnv)
     cbrd = get_player_board(env, CROSS)
     order = (env.curplayer == NOUGHT) ? (@SVector [nbrd, cbrd]) : (@SVector [cbrd, nbrd])
     return Float32.(reduce(vcat, order))
+end
+
+function BatchedEnvs.masks(env::BitwiseConnectFourEnv)
+    return @SVector [BatchedEnvs.valid_action(env,k) for k in 1:NUM_COLUMNS]
 end
 
 end

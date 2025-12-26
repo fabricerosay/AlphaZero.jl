@@ -76,9 +76,10 @@ function step_save_reset!(config, envs,startenvs, steps_counter, actions, policy
     num_actions = BatchedEnvs.num_actions(config.EnvCls)
     # save step data
     states = BatchedEnvs.vectorize_state.(envs)
+    masks=BatchedEnvs.masks.(envs)
     rewards = Float32.(map(x -> last(x).reward, out))
     switches = map(x -> last(x).switched, out)
-    save!(ep_buff, states, actions,policy, rewards, switches)
+    save!(ep_buff, states, masks ,policy, rewards, switches)
 
     # get terminated envs
     dones = DeviceArray(Devices.get_device(envs))(BatchedEnvs.terminated.(new_envs))
@@ -97,7 +98,7 @@ function step_save_reset!(config, envs,startenvs, steps_counter, actions, policy
     end
 
     # reset terminated envs
-    moves1=gpu(rand(1:num_actions,config.num_envs))
+    moves1=gpu(rand(1:(num_actions+1)^4-1,config.num_envs))
     choosing=gpu(rand(config.num_envs))
     AcceleratedKernels.foreachindex(choosing) do env_id
         @inbounds if dones[env_id]
@@ -130,10 +131,11 @@ are the value and policy losses respectively.
 - `actions`: One-hot encodings of actions taken. Size: (num_actions, batch_size)
 - `state_values`: The value function targets. Size: (1, batch_size)
 """
-function alphazero_loss(nn, states, actions, state_values)
-    pred_v, pred_logits = forward(nn, states, true)
+function alphazero_loss(nn, states, masks,policy, state_values)
+    pred_v, pred_logits = forward(nn, states,false)
+    pred_probs=Flux.softmax(pred_logits + (-1f9) .*(1 .-masks))
     value_loss = Flux.mse(pred_v, state_values)
-    policy_loss = Flux.kldivergence(pred_logits, actions)
+    policy_loss = Flux.kldivergence(pred_probs, policy)
     loss = value_loss + policy_loss
     return value_loss, policy_loss, loss
 end
@@ -160,23 +162,23 @@ Trains and returns the provided neural network on the provided replay buffer.
 """
 function train!(nn, replay_buffer, opt, device, config, loggers, rng)
     # get the data in a meaningul format
-    states, actions, state_values = to_array(replay_buffer)
+    states, masks, policy, state_values = to_array(replay_buffer)
     # d=Set()
     # for k in 1:replay_buffer.current_size
     #     push!(d,states[:,k])
     # end
    # println("diversity ratio: ",length(d)/replay_buffer.current_size)
     # create a dataloader
-    data = (states, actions, state_values)
+    data = (states, masks,policy, state_values)
     dataloader = Flux.DataLoader(data, batchsize=config.batch_size, shuffle=true, rng=rng)
     batchsize=config.batch_size
     # train the model for the specified number of epochs
     for _ in 1:config.train_epochs
         cpt=0
         for batch in dataloader
-            if batchsize*cpt>1_000_000
-                break
-            end
+            # if batchsize*cpt>500_000
+            #     break
+            # end
             cpt+=1
             # if the batch has only 1 element, it will trigger NaN in BatchNorm -> skip
             (size(batch[1])[end] == 1) && continue
@@ -221,7 +223,7 @@ function selfplay!(config, device, nn, print_progress=true)
     state_size = BatchedEnvs.state_size(config.EnvCls)
     num_actions = BatchedEnvs.num_actions(config.EnvCls)
 
-    adam = Flux.Optimiser(Flux.WeightDecay(config.weight_decay), Flux.Adam(config.adam_lr))
+    adam = Flux.OptimiserChain(Flux.WeightDecay(config.weight_decay), Adam(config.adam_lr))
     opt = Flux.setup(adam, nn)
 
     envs, steps_counter = init_envs(config, config.num_envs, device)
@@ -266,7 +268,7 @@ function selfplay!(config, device, nn, print_progress=true)
             t = @elapsed begin
                 actions = MCTS.alphazero_policy(tree, mcts_config, steps_counter, mcts_rng)
                 policy= get_root_children_visits(tree, mcts_config)|>cpu
-                policy=[SVector{num_actions}(policy[:,k]) for k in 1:size(policy)[2]]
+                policy=[SVector{num_actions}(0.75f0*policy[:,k]) for k in 1:size(policy)[2]]
             end
             times.selection_times[step] = t
         end
@@ -284,8 +286,8 @@ function selfplay!(config, device, nn, print_progress=true)
                 set_train_mode!(nn)
                 nn = train!(nn, rp_buff, opt, device, config, loggers, train_rng)
                 set_test_mode!(nn)
-                lr=min(0.001f0,1.4f0*lr)
-                Optimisers.adjust!(opt, lr)
+                lr=max(0.0001f0,lr*0.987f0)
+                Optimisers.adjust!(opt, Float32(lr))
             end
             
             # if step % (batch_train_freq)==0

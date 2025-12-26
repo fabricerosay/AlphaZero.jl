@@ -141,7 +141,7 @@ Note: The two types of implemented MCTS algorithms can be found in the following
     mcts_value_scale_root::Float32 = 0.1f0
     mcts_max_visit_init::Int = 50
     mcts_temperature::Float32 =1.2f0
-
+    mcts_temperature_search::Float32=1.1f0
     # AlphaZero MCTS variables
     c_puct::Float32 = 1.0f0
     alpha_dirichlet::Float32 = 0.3f0
@@ -209,7 +209,8 @@ function init_mcts_config(device::Device, nn::Net, config) where Net <: FluxNetw
             value_scale=config.mcts_value_scale,
             value_scale_root=config.mcts_value_scale_root,
             max_visit_init=config.mcts_max_visit_init,
-            temperature=config.mcts_temperature
+            temperature=config.mcts_temperature,
+            temperature_search=config.mcts_temperature_search
         )
     else
         return AlphaZeroMctsConfig(;

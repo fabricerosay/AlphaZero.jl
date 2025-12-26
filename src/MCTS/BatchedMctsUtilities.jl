@@ -148,6 +148,7 @@ A batch, device-specific Gumbel MCTS MctsConfig that leverages an external `EnvO
     value_scale::Float32 = 0.1f0
     value_scale_root::Float32 = 0.1f0
     temperature::Float32 =1.2f0
+    temperature_search::Float32=1.1f0
     max_visit_init::Int = 50
 end
 

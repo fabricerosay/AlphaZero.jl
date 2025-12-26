@@ -104,7 +104,7 @@ using CUDA
 
     # A softmax implementation that does not use in place updates
     # and therefore can also be used on StaticArrays.
-    function softmax(xs; eps=1e-15)
+    function softmax(xs;integer=false, eps=1e-15)
         minval = typemin(eltype(xs))
         z = zero(eltype(xs))
         xs = xs .- maximum(xs; init=minval)

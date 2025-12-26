@@ -10,8 +10,33 @@ using JLD2
 
 const MCTS = BatchedMcts
 
+function get_considered_visits_table(num_simulations, num_actions)
+    ret = map(1:num_actions) do num_considered_actions
+        get_considered_visits_sequence(num_considered_actions, num_simulations)
+    end
+    return SVector{num_actions}(ret)
+end
 
-const N = 9
+function get_considered_visits_sequence(max_num_actions, num_simulations)
+    max_num_actions <= 1 && return SVector{num_simulations, Int16}(0:(num_simulations - 1))
+
+    num_halving_steps = Int(ceil(log2(max_num_actions)))
+    sequence = Int16[]
+    visits = zeros(Int16, max_num_actions)
+
+    num_actions = max_num_actions
+    while length(sequence) < num_simulations
+        num_extra_visits = max(1, num_simulations ÷ (num_halving_steps * num_actions))
+        for _ in 1:num_extra_visits
+            append!(sequence, visits[1:num_actions])
+            visits[1:num_actions] .+= 1
+        end
+        num_actions = max(2, num_actions ÷ 2)
+    end
+
+    return SVector{num_simulations}(sequence[1:num_simulations])
+end
+const N = 7
 const A_CODE = Int('A') # ASCII code for 'A'
 
 # --- Indexing Function (copied from BitwiseHexEnv) ---
@@ -97,7 +122,7 @@ function flat_to_alg(n)::Union{String, Nothing}
 end
 # set these constants to your preference
 const DEVICE = CPU()
-const MODEL_PATH = "examples/models/hex-checkpoints/model_10700.jld2"
+const MODEL_PATH = "examples/models/hex-checkpoints/model_03000.jld2"
 const nn_config = SimpleResNetHP(
     width=512,
     depth_common=6,
@@ -137,6 +162,16 @@ function _mcts_action(env, mcts_config)
     return action
 end
 
+function pov_action(action,player)
+	if player==1
+		return action
+	else
+		x=div(action-1,N)
+		y=action-1-N*x
+		return N*y+x+1
+	end
+end
+
 function _nn_move(env, nn)
     na = BatchedEnvs.num_actions(typeof(env))
     state = BatchedEnvs.vectorize_state(env)
@@ -158,6 +193,7 @@ function _parse_player_action(env)
     alg_action =readline()
     println("alg_action: $alg_action")
     action=alg_to_flat(alg_action)
+    action=pov_action(action,-1)
     println("action $action")
     while isnothing(action) || action ∉ valid_actions
         print("Invalid action. Please choose one of $valid_actions. Input action: ")

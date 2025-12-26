@@ -550,9 +550,9 @@ Selects the best action for exploration at a given node.
 # Returns
 - The action to explore if there's at least one valid action; otherwise, `NO_ACTION`.
 """
-function gumbel_select_action(c_scale, c_visit, tree, cid, bid, num_actions::Val{A}) where A
+function gumbel_select_action(c_scale, c_visit,temp, tree, cid, bid, num_actions::Val{A}) where A
     # compute the policy: π′ = softmax(logits + σ(completedQ))
-    logits = SVector{A}(imap(aid -> tree.logit_prior[aid, cid, bid], 1:A))
+    logits = SVector{A}(imap(aid -> tree.logit_prior[aid, cid, bid]/temp, 1:A))
     σ_q = transformed_qvalues(c_scale, c_visit, tree, cid, bid, num_actions)
     policy = softmax(logits + σ_q)
 
@@ -777,11 +777,11 @@ function search(mcts_config, tree)
     c_scale = use_gumbel ? mcts_config.value_scale : 0f0
     c_visit = use_gumbel ? mcts_config.max_visit_init : 0f0
     c_puct = use_gumbel ? 0f0 : mcts_config.c_puct
-
+    temp=use_gumbel ? mcts_config.temperature_search : 0f0
     parent_frontier = zeros(Int16, mcts_config.device, (2, batch_size(tree)))
     AcceleratedKernels.foraxes(parent_frontier,2) do  bid
         if use_gumbel
-            new_frontier = gumbel_search(c_scale, c_visit, tree, bid, num_actions)
+            new_frontier = gumbel_search(c_scale, c_visit,temp, tree, bid, num_actions)
         else
             new_frontier = alphazero_search(c_puct, tree, bid, num_actions)
         end
@@ -802,14 +802,14 @@ algorithm described in the Gumbel MCTS paper.
 # Returns
 - A tuple `(node, action)` containing the node and action to explore.
 """
-function gumbel_search(value_scale, max_visit_init, tree, bid, num_actions; start=ROOT)
+function gumbel_search(value_scale, max_visit_init,temp,tree, bid, num_actions; start=ROOT)
     cur = start
     while true
         if tree.terminal[cur, bid]
             # returns current terminal, but no action played
             return cur, NO_ACTION
         end
-        aid = gumbel_select_action(value_scale, max_visit_init, tree, cur, bid, num_actions)
+        aid = gumbel_select_action(value_scale, max_visit_init,temp,tree, cur, bid, num_actions)
         @assert aid != NO_ACTION
 
         cnid = tree.children[aid, cur, bid]
@@ -962,6 +962,7 @@ See also [`gumbel_select_root_action`](@ref)
 function gumbel_select(mcts_config, tree, simnum, gumbel, considered_visits_table)
     num_actions = Val(n_actions(tree))
     c_scale, c_visit = mcts_config.value_scale, mcts_config.max_visit_init
+    temp=mcts_config.temperature_search
     num_considered_actions = mcts_config.num_considered_actions
 
     parent_frontier = zeros(Int16, mcts_config.device, 2, batch_size(tree))
@@ -977,11 +978,10 @@ function gumbel_select(mcts_config, tree, simnum, gumbel, considered_visits_tabl
             simnum - ROOT,
             num_actions
         )
-        @assert aid != NO_ACTION
-
+        @assert aid!= NO_ACTION
         cnid = tree.children[aid, ROOT, bid]
         new_frontier = if (cnid != UNVISITED)
-            gumbel_search(c_scale, c_visit, tree, bid, num_actions; start=cnid)
+            gumbel_search(c_scale, c_visit,temp, tree, bid, num_actions; start=cnid)
         else
             (ROOT, aid)
         end
@@ -1083,7 +1083,7 @@ function gumbel_select_root_action(
     g = SVector{A}(imap(aid -> gumbel[aid, bid], 1:A))
 
     # get logits and σ(completedQ)
-    logits = SVector{A}(imap(aid -> tree.logit_prior[aid, ROOT, bid]/1.2f0, 1:A))
+    logits = SVector{A}(imap(aid -> tree.logit_prior[aid, ROOT, bid], 1:A))
     σ_q = transformed_qvalues(c_scale, c_visit, tree, ROOT, bid, num_actions)
 
     # -∞ penalty to mask out actions not in `argtop(g(a) + logits + σ(completedQ), m)`
